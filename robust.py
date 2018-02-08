@@ -1,4 +1,7 @@
 import sys
+import numpy as np
+from scipy.misc import comb
+
 """
 This set of functions turns a list of repeating numbers (such as cluster assignments) into sets of  
 positions that always co-occur.
@@ -62,6 +65,7 @@ class cmethod():
         self.name = name
         self.silscore = silscore
 	self.labels = labels
+        self.strlabels = ['A'+str(i) for i in labels]
         self.dups = list_duplicates(self.labels)
         self.skewCheck(fract)
     def skewCheck(self, fract):
@@ -73,4 +77,24 @@ class cmethod():
                 print >>sys.stderr, "{} cluster {} occurs {} times, skipping this method".format(self.name, str(c), ct)
                 self.ok = False
                 break
+
+def randScore(truth, labels):
+    """Unadjusted Rand Index from  https://stats.stackexchange.com/questions/89030/rand-index-calculation answer 3"""
+    truth = listBin(truth)
+    labels = listBin(labels)
+    tp_plus_fp = comb(np.bincount(truth), 2).sum()
+    tp_plus_fn = comb(np.bincount(labels), 2).sum()
+    A = np.c_[(truth, labels)]
+    tp = sum(comb(np.bincount(A[A[:, 0] == i, 1]), 2).sum()
+             for i in set(truth))
+    fp = tp_plus_fp - tp
+    fn = tp_plus_fn - tp
+    tn = comb(len(A), 2) - tp - fp - fn
+    return (tp + tn) / (tp + fp + fn + tn)
+
+
+def listBin(mylist):
+    """Turn a list of strings into a list of numbers:  ["A", "A", "B", "A"] becomes [0, 0, 1, 0]"""
+    uniqs = list(set(mylist))
+    return [uniqs.index(i) for i in mylist]
 
