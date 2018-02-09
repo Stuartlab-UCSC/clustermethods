@@ -64,6 +64,7 @@ parser.add_argument('--maxfract', type=float, default=0.8,  help="Maximum percen
 parser.add_argument('--no_subsample', action='store_true',  help="Use the full set (Program uses 1000 samples by default)")
 parser.add_argument('--base', type=str, default='clusters', help="Basename for output (default clusters)")
 parser.add_argument('--min_groupsize', type=int, default=3,  help="Minimum number of samples in a shared group (default 3)")
+parser.add_argument('--print_reduced', action='store_true',  help="Print the 1000 genes that were used for clustering in a gene by sample table, useful if you want to do any subsequent runs, or upload to Tumormap")
 
 if len(sys.argv)==1:
     parser.print_help()
@@ -81,7 +82,7 @@ start = time.time()
 print >>sys.stderr, passedTime(start, time.time()), "reading", args.inputfile
 df=pd.read_table(args.inputfile, sep='\t', header=0, index_col=0)
 
-# randomly select 1000 samples (comment this out if you want to do a full scale run)
+# randomly select 1000 samples 
 if not args.no_subsample:
     print >>sys.stderr, passedTime(start, time.time()),  "randomly selecting 1000 samples"
     ids = list(df)
@@ -101,15 +102,13 @@ df.reindex(index=list(colorder.sort_values(ascending=False).index))
 # get 1000 most variable genes over all samples
 df = df.head(1000)
 
-#df.to_csv('red.tsv', sep='\t')
-#sys.exit()
+if args.print_reduced:
+    df.to_csv(args.base+'.1kgenes.tsv', sep='\t')
 
 ### TODO: MUST FILTER OUT LOW SCORING SAMPLES
 
-# Some methods want a gene_by_sample dataframe, others a sample_by_gene
-gbs = df
+# input to clusterers is the transposed dataframe
 sbg = df.transpose()
-
 
 #####  Cluster  ######################################################
 
