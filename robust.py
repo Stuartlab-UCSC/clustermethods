@@ -65,7 +65,7 @@ class cmethod():
         self.name = name
         self.silscore = silscore
 	self.labels = labels
-        self.strlabels = ['A'+str(i) for i in labels]
+        self.strlabels = ['A'+str(i) if i>=0 else '0' for i in labels]
         self.dups = list_duplicates(self.labels)
         self.skewCheck(fract)
     def skewCheck(self, fract):

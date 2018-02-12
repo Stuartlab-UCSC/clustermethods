@@ -65,6 +65,7 @@ parser.add_argument('--no_subsample', action='store_true',  help="Use the full s
 parser.add_argument('--base', type=str, default='clusters', help="Basename for output (default clusters)")
 parser.add_argument('--min_groupsize', type=int, default=3,  help="Minimum number of samples in a shared group (default 3)")
 parser.add_argument('--print_reduced', action='store_true',  help="Print the 1000 genes that were used for clustering in a gene by sample table, useful if you want to do any subsequent runs, or upload to Tumormap")
+parser.add_argument('--noK', action='store_true',  help="Skip Kmeans and Kmedoids (useful if you care about the grouped samples)")
 
 if len(sys.argv)==1:
     parser.print_help()
@@ -162,25 +163,26 @@ for l in ['average', 'complete']:
     hiersaObject = robust.cmethod(cname, labels, silscore, args.maxfract)
     methods.append(hiersaObject)
 
-print >>sys.stderr, passedTime(start, time.time()),  "KMEANS  (probabilistic, varies wildly)"
-# I thought max_iter was supposed to result in convergence but it doesn't seem to help much
-# run 5 times just to show range of outcome
-for i in xrange(1,6):
-    kmeans = KMeans(init='k-means++', n_clusters=args.clusters, n_init=args.clusters, max_iter=100)
-    labels = kmeans.fit_predict(sbg)
-    silscore = silhouette_score(sbg, labels)
-    cname = 'kmeans_' + str(i)
-    kmeansObject = robust.cmethod(cname, labels, silscore, args.maxfract)
-    methods.append(kmeansObject)
-
-print >>sys.stderr, passedTime(start, time.time()),  "KMEDOIDS  (probabilistic, varies wildly)"
-# Same issue as Kmeans. Same approach
-for i in xrange(1,6):
-    medoids, clusterinfo, labels = kmedoids.kMedoids(s_distance, args.clusters)
-    silscore = silhouette_score(s_distance, labels)
-    cname = 'kmedoids_' + str(i)
-    kmedObject = robust.cmethod(cname, labels, silscore, args.maxfract)
-    methods.append(kmedObject)
+if not args.noK:
+    print >>sys.stderr, passedTime(start, time.time()),  "KMEANS  (probabilistic, varies wildly)"
+    # I thought max_iter was supposed to result in convergence but it doesn't seem to help much
+    # run 5 times just to show range of outcome
+    for i in xrange(1,6):
+        kmeans = KMeans(init='k-means++', n_clusters=args.clusters, n_init=args.clusters, max_iter=100)
+        labels = kmeans.fit_predict(sbg)
+        silscore = silhouette_score(sbg, labels)
+        cname = 'kmeans_' + str(i)
+        kmeansObject = robust.cmethod(cname, labels, silscore, args.maxfract)
+        methods.append(kmeansObject)
+    
+    print >>sys.stderr, passedTime(start, time.time()),  "KMEDOIDS  (probabilistic, varies wildly)"
+    # Same issue as Kmeans. Same approach
+    for i in xrange(1,6):
+        medoids, clusterinfo, labels = kmedoids.kMedoids(s_distance, args.clusters)
+        silscore = silhouette_score(s_distance, labels)
+        cname = 'kmedoids_' + str(i)
+        kmedObject = robust.cmethod(cname, labels, silscore, args.maxfract)
+        methods.append(kmedObject)
 
 
 #####  Validate results  ######################################################
@@ -189,15 +191,13 @@ for i in methods:
     if i.ok:
         print "{0:.2f} silhouette score for {1}".format(i.silscore, i.name)
 
-
-
 print >>sys.stderr, passedTime(start, time.time()),  "Finding consistent groups in all methods used"
 setlist = [i.dups for i in methods if i.ok]
 
 # print consistent groups of samples
-grouplist1 = robust.persistent_groups(copy.copy(setlist), list(sbg.index), args.min_groupsize)
-for i in xrange(min(args.clusters, len(grouplist1))):
-    print "Group {}, size {}: {}".format(i, len(grouplist1[i])," ".join(str(x) for x in grouplist1[i]))
+#grouplist1 = robust.persistent_groups(copy.copy(setlist), list(sbg.index), args.min_groupsize)
+#for i in xrange(min(args.clusters, len(grouplist1))):
+#    print "Group {}, size {}: {}".format(i, len(grouplist1[i])," ".join(str(x) for x in grouplist1[i]))
 
 
 ####  Hold out #####################################################################
@@ -220,9 +220,10 @@ for i in xrange(len(namelist)):
         print >>sys.stderr, "best group currently the one without {}, groupsize is then {}".format(namelist[i], count)
         bestgroup = grouplist
         maxsize = count
-    print >>sys.stderr, i, namelist[i], count
 
-# Treat the shared groups like any other cluster method. Any sample not in a group gets a -1
+# Treat the shared groups like any other cluster method. Any sample not in a group is labeled -1
+# this gets changed to '0' in printing so Tumormap won't show it
+ 
 # print the groups to file
 samples = list(sbg.index)
 labels = [-1] * len(sbg.index)
@@ -248,12 +249,3 @@ outdf = outdf.transpose()
 outdf.columns = [i.name for i in methods if i.ok]
 outdf.to_csv(args.base+'.clusters.tsv', sep='\t')
 
-#for a in ['euclidean', 'l1', 'l2', 'manhattan', 'cosine']:
-#    for l in ['average', 'complete']:
-#        ac = AgglomerativeClustering(n_clusters=n_clusters, affinity=a, linkage=l)
-#        ac.fit_predict(sbg)
-#        labels = ac.labels_
-#        ajr = adjusted_rand_score(truth, labels)
-#        rs = robust.randScore(truth, labels)
-#        silscore = silhouette_score(s_distance, labels, metric="precomputed")
-#        print "{0:.2f} AJR\t{4:.02f} AR\t{1:.02f} silscore\tAG {2} {3}".format(ajr, silscore, d, l, rs)
