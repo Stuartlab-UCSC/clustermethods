@@ -1,5 +1,7 @@
 import sys
 import numpy as np
+import pandas as pd
+import scipy.spatial.distance as dist
 from scipy.misc import comb
 
 """
@@ -27,7 +29,8 @@ def persistent_groups(setlist, samples, minsize):
 	retlist.append(slist)
     # sort so that the largest groups are listed first
     retlist.sort(key=len, reverse=True)
-    return retlist
+    return retlist, tally
+
 
 
 def list_duplicates(mylist):
@@ -61,8 +64,9 @@ def adj_rand_score(labeldict):
             print "{0:0.2f}\t{1} vs {2}".format(adjusted_rand_score(labeldict[a_label], dictcopy[b_label]), a_label, b_label)
 
 class cmethod():
-    def __init__(self, name, labels, silscore, fract):
+    def __init__(self, name, labels, silscore, cscore, fract):
         self.name = name
+        self.cscore = cscore
         self.silscore = silscore
 	self.labels = labels
         self.strlabels = ['A'+str(i) if i>=0 else '0' for i in labels]
@@ -77,6 +81,29 @@ class cmethod():
                 print >>sys.stderr, "{} cluster {} occurs {} times, skipping this method".format(self.name, str(c), ct)
                 self.ok = False
                 break
+
+def rename_labels(methodlist, tally):
+    """Attempt to give shared groups the same labels in all methods"""
+    # persistent_tally is a list of sets of indices to the (str)labels
+    # order tally by length of list
+    tally.sort(key=len, reverse=True)
+    ct = 0
+    for m in methodlist:
+        m.replaced = list(set(m.strlabels))
+        m.orderedlabels = m.strlabels[:]
+    for group in tally:
+        ct += 1
+        newlabel = 'B'+str(ct)
+        # loop over all cmethods
+        for m in methodlist:
+            labelmatches = [m.strlabels[g] for g in group]
+            # get the most occurring label match (this is a problem with ties!)
+            label = max(set(labelmatches), key=labelmatches.count)
+            # only replace once
+            if label in m.replaced:
+                if label != '0':
+                    m.orderedlabels = [newlabel if x==label else x for x in m.orderedlabels]
+                m.replaced.remove(label)
 
 def randScore(truth, labels):
     """Unadjusted Rand Index from  https://stats.stackexchange.com/questions/89030/rand-index-calculation answer 3"""
@@ -97,4 +124,72 @@ def listBin(mylist):
     """Turn a list of strings into a list of numbers:  ["A", "A", "B", "A"] becomes [0, 0, 1, 0]"""
     uniqs = list(set(mylist))
     return [uniqs.index(i) for i in mylist]
+
+def distanceMatrix(clusterObject):
+    """Add a scipy hierarchy style distance matrix to the input clusterobject"""
+    # what is the lowest number in the input children (usually 0 or 1)?
+    minct = min(min(x, y) for x, y in clusterObject.children_)
+    childcount = {key:1 for key in xrange(minct, len(clusterObject.children_)+1)}
+    counters = []
+    for s, e in clusterObject.children_:
+        ct = childcount[s] + childcount[e]
+        counters.append(ct)
+        childcount[len(childcount)] = ct
+    clusterObject.distancematrix = np.column_stack([clusterObject.children_, clusterObject.distance, counters])
+    return clusterObject
+
+# the functions below were all copied from calc/spatial.py
+def ztransDF(df):
+    '''
+    :param df: pandas structure, series or data frame
+    :return: z-score normalized version of df.
+    '''
+    return ((df - df.mean(axis=0)) / df.std(axis=0, ddof=0))
+def spatialWeightMatrix(xys):
+    '''
+    :param xys: x-y positions for nodes on the map
+    :return: col X col inverse euclidean distance matrix,
+    row normalized to sum to 1.
+    '''
+    invDist = inverseEucDistance(xys)
+
+    # Self comparisons to 0
+    notZd = pd.DataFrame(invDist,index=xys.index,columns=xys.index)
+
+    return (notZd / notZd.sum(axis=1))
+
+def inverseEucDistance(xys):
+
+    distmat = dist.squareform(dist.pdist(xys,'euclidean'))
+    return 1 / (1 + distmat)
+
+def catSSS(catLee):
+    #below we are twice over counting (matrix is symetric) but also twice over dividing, so that's not a mistake
+
+    #         average of on_diagonal                           average of off diagonal
+    return (catLee.trace() / catLee.shape[0]) - ((catLee.sum() - catLee.trace())/ (catLee.shape[1]**2 - catLee.shape[1]))
+
+
+# code below copied from calc/leesL.py
+def leesL(Z, V):
+    VTV = np.dot(V.transpose(), V)
+    ZTVTVZ = np.dot(np.dot(Z.transpose(),  VTV), Z)
+    return ZTVTVZ / VTV.sum().sum()
+
+def leesLScore(xys, labels):
+    """
+    Returns the distance score between a set of coordinates and features (here cluster labels)
+    """
+    datMat = pd.get_dummies(labels).apply(pd.to_numeric)
+    datMat = datMat.loc[xys.index]
+    # in case we lost any categories for the map we are looking at
+    datMat = datMat[datMat.columns[datMat.sum() != 0]] 
+    datMat = ztransDF(datMat)
+    wm = spatialWeightMatrix(xys)
+    score = catSSS(
+              leesL(
+                 datMat, wm
+              )
+            )
+    return score
 
