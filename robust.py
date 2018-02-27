@@ -5,10 +5,7 @@ import scipy.spatial.distance as dist
 from scipy.misc import comb
 
 """
-This set of functions turns a list of repeating numbers (such as cluster assignments) into sets of  
-positions that always co-occur.
-for instance in [0, 1, 2, 3, 1] vs ["a", "bra", "ca", "da", "bra"], positions 2 and 5 occur together (as 2 in 
-the first list and "bra" in the second). The lists can contain anything, however -1 values are ignored.
+Helper functions for clustermethods.py
 """
 
 from collections import defaultdict
@@ -16,7 +13,10 @@ from sklearn.metrics import adjusted_rand_score
 import copy
 
 def persistent_groups(setlist, samples, minsize):
-    """Find samples that always group together in groups of minsize"""
+    """Find samples that always group together in groups of minsize. For instance 
+       in [0, 1, 2, 3, 1] vs ["a", "bra", "ca", "da", "bra"], positions 2 and 5 occur together (as 2 in 
+       the first list and "bra" in the second). The lists can contain anything, however -1 values are ignored.
+    """
     tally = common_idx(setlist.pop(0), setlist.pop(0))
     while(setlist):
         tally = common_idx(tally, setlist.pop(0))
@@ -55,7 +55,11 @@ def common_idx(X, Y):
                 tally.append(have_common)
     return tally
 
-def adj_rand_score(labeldict):
+def adj_rand_score(truth, labels):
+    """Orphan function to calculate adjusted rand score"""
+    return adjusted_rand_score(truth, labels)
+
+def adj_rand_score_old(labeldict):
     """Orphan function to calculate adjusted rand score"""
     dictcopy = copy.copy(labeldict)
     for a_label in labeldict:
@@ -138,13 +142,14 @@ def distanceMatrix(clusterObject):
     clusterObject.distancematrix = np.column_stack([clusterObject.children_, clusterObject.distance, counters])
     return clusterObject
 
-# the functions below were all copied from calc/spatial.py
+# the functions below were all copied from code in TumorMap's https://github.com/ucscHexmap/compute/calc/
 def ztransDF(df):
     '''
     :param df: pandas structure, series or data frame
     :return: z-score normalized version of df.
     '''
     return ((df - df.mean(axis=0)) / df.std(axis=0, ddof=0))
+
 def spatialWeightMatrix(xys):
     '''
     :param xys: x-y positions for nodes on the map
@@ -167,7 +172,8 @@ def catSSS(catLee):
     #below we are twice over counting (matrix is symetric) but also twice over dividing, so that's not a mistake
 
     #         average of on_diagonal                           average of off diagonal
-    return (catLee.trace() / catLee.shape[0]) - ((catLee.sum() - catLee.trace())/ (catLee.shape[1]**2 - catLee.shape[1]))
+#    return (catLee.trace() / catLee.shape[0]) - ((catLee.sum() - catLee.trace())/ (catLee.shape[1]**2 - catLee.shape[1]))
+    return [(catLee.trace() / catLee.shape[0]), ((catLee.sum() - catLee.trace())/ (catLee.shape[1]**2 - catLee.shape[1]))]
 
 
 # code below copied from calc/leesL.py
@@ -176,7 +182,7 @@ def leesL(Z, V):
     ZTVTVZ = np.dot(np.dot(Z.transpose(),  VTV), Z)
     return ZTVTVZ / VTV.sum().sum()
 
-def leesLScore(xys, labels):
+def leesLScore(xys, labels, split=False):
     """
     Returns the distance score between a set of coordinates and features (here cluster labels)
     """
@@ -186,10 +192,13 @@ def leesLScore(xys, labels):
     datMat = datMat[datMat.columns[datMat.sum() != 0]] 
     datMat = ztransDF(datMat)
     wm = spatialWeightMatrix(xys)
-    score = catSSS(
+    [posScore, negScore]= catSSS(
               leesL(
                  datMat, wm
               )
             )
-    return score
+    if split:
+        return [posScore, negScore]
+    else:
+        return posScore+negScore
 
