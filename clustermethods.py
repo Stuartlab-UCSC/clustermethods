@@ -108,9 +108,9 @@ df = df[df.mean(1)>1]
 
 # Rank genes by stdev
 print >>sys.stderr, passedTime(start, time.time()),  "selecting 1000 genes with highest stdev"
-colorder = np.argsort(np.std(df,1))
-# Sort df by stdev, highest first
-df.reindex(index=list(colorder.sort_values(ascending=False).index))
+df['stdev'] = df.std(axis=1)
+df.sort_values('stdev', inplace=True, ascending=False)
+df.drop('stdev', axis=1, inplace=True)
 # get 1000 most variable genes over all samples
 df = df.head(1000)
 
@@ -127,7 +127,7 @@ sbg = df.transpose()
 print >>sys.stderr, passedTime(start, time.time()),  "t-SNE..."
 projection = TSNE().fit_transform(sbg)
 xys = pd.DataFrame(projection, index=sbg.index)
-xys.to_csv(args.base+'tsne_xys.tsv', index_label='#ID', sep='\t')
+xys.to_csv(args.base+'.tsne_xys.tsv', index_label='#ID', sep='\t')
 # we can't use the sbg.index later on, so create new
 projection = pd.DataFrame(projection)
 
@@ -251,6 +251,8 @@ for i in methods:
             print "{0:.2f}\tNA\t{1:0.3f}\t{2}".format(i.silscore, i.leesL, i.name)
         else:
             print "{0:.2f}\t{1:0.2f}\t{3:0.3f}\t{2}".format(i.silscore, i.cscore, i.name, i.leesL)
+
+shareObject.ok = True
 
 #####  Output cluster file  ###################################################
 #samples on rows, clusters in columns - prepend a letter to the labels so TumorMap will show them properly
