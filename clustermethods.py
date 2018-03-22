@@ -3,18 +3,13 @@
 """
 THIS IS A WORK IN PROGRESS. CODE NEEDS TO BE REFACTORED
 
-The goal of this program is to run several clustering methods on a gene by sample FPKM tsv file, and to return information that allows
+The goal of this program is to run several clustering methods on a gene by sample log2(FPKM/TPM)+1 tsv file, and to return information that allows
 the researcher to decide on the 'best' one. Unfortunately there are few 'blind' measures to decide this, at least without having
 a ground truth. The silhouette score is one, and a good range is supposed to be upwards of 0.6 (it goes to 1).
 Another one is the cophenetic index, but it can only be calculated with the use of a distance matrix so it cannot be used
 for biclustering or kmeans/kmedoids.
-Lastly, the density score (leesL; see TumorMap documentation) can be calculated for an input set of xy coordinates. To get these 
-from a dimension reduction method, t-SNE is run. 
 
-The current output consists of these scores and files that contain t-SNE xy coordinates, cluster labels per method, and
-sample groups that consistently occur together in each algorithm.
-
-The program is dependent on three homemade libraries: robust, kmedoids and hierarchical. These should be in the same github repo
+The program is dependent on three homemade libraries: utils, kmedoids and hierarchical. These should be in the same github repo
 as the current program. Hierarchical is a slightly altered copy of sklearn.cluster.AgglomerativeClustering. See the code for details.
 
 The module python-sklearn can be installed on Ubuntu using apt-get; scipy and numpy can be pip installed.
@@ -27,7 +22,7 @@ import textwrap
 import copy
 import numpy as np
 import pandas as pd
-import robust
+import utils
 import kmedoids
 import time
 
@@ -56,30 +51,34 @@ Runs kmeans, kmedoids, biclustering and different kinds of hierarchical clusteri
 on input gene by sample tsv format file. Data is filtered for low expression and only the top 1000
 most variable genes are used.
 
-Program starts by running t-SNE and then uses its xy coordinates to measure the density score for each method. A higher density score means 
-that the clusters match the 'blobs' in the t-SNE output better. 
-It also calculates the cophenetic index (for methods that use a distance matrix) and the silhouette score. 
-A table with these scores for each method is printed to STDOUT.
+Program calculates the cophenetic index (for hierarchical trees) and the silhouette score. 
+Note that the cophenetic index will not change for different cluster numbers: it is calculated for the whole tree
 
 Outputs:
 <args.base>.clusters.tsv	a sample by clustermethod table which can be used as 'color' upload to Tumormap
-<args.base>.shared.txt		groupings of samples that nearly always cluster together no matter which method is used.
-<args.base>.tsne_xys.txt	xy coordinate output from t-SNE. This file can be used as a layout input to Tumormap
+<args.base>.scores.txt		silhouette score and cophenetic index for methods
+<args.base>.groups.txt		(optional) groupings of samples that nearly always cluster together no matter which method is used.
 
-NOTE: Several methods used here, including t-SNE, are probabilistic and will NOT give the exact same output twice. 
-Usually you will find that the same method scores best on different runs.
+NOTE: Several methods used here are probabilistic and will NOT give the exact same output twice. 
+However, usually you will find that the same method scores best on different runs.
+
 
         '''))
 group = parser.add_argument_group('required arguments')
 group.add_argument('inputfile', type=str, help='input tsv file')
 # optional flag
-parser.add_argument('--clusters', type=int, default=5,  help="Number of expected clusters (default 5)")
-parser.add_argument('--maxfract', type=float, default=0.8,  help="Maximum percentage of input samples allowed to end up in the same cluster (default 0.8)")
-parser.add_argument('--no_subsample', action='store_true',  help="Use the full set (Program uses 1000 samples by default)")
-parser.add_argument('--base', type=str, default='clusters', help="Basename for output (default clusters)")
+parser.add_argument('--clusters',      type=int, default=5,  help="Number of expected clusters (default 5)")
+parser.add_argument('--genes',         action='store_true',  help="Cluster genes instead of samples")
+parser.add_argument('--maxfract',      type=float, default=0.8,  help="Maximum percentage of input samples allowed to end up in the same cluster (default 0.8)")
+parser.add_argument('--subsample',     type=int, default=False,  
+    help="Use this number of samples instead of the whole set. Good for running quick tests on larger datasets")
+parser.add_argument('--base',          type=str, default='clusters', help="Basename for output (default clusters)")
+parser.add_argument('--print_reduced', action='store_true',  
+     help="Print the 1000 genes that were used for clustering in a gene by sample table, useful if you want to do any subsequent runs, or upload to Tumormap")
+parser.add_argument('--print_groups',  action='store_true',  
+     help="Save a list of sample groups that always occur together, no matter which clustering method was used. This is useful for defining core groups of samples. Setting this flag also adds a 'shared' column to the clusters file")
 parser.add_argument('--min_groupsize', type=int, default=3,  help="Minimum number of samples in a shared group (default 3)")
-parser.add_argument('--print_reduced', action='store_true',  help="Print the 1000 genes that were used for clustering in a gene by sample table, useful if you want to do any subsequent runs, or upload to Tumormap")
-parser.add_argument('--noK', action='store_true',  help="Skip Kmeans and Kmedoids (useful if you care about the grouped samples)")
+parser.add_argument('--noK',           action='store_true',  help="Skip Kmeans and Kmedoids (useful if you care about the grouped samples)")
 
 args = parser.parse_args()
 if args.maxfract > 1 or args.maxfract < 0.05:
@@ -94,15 +93,15 @@ start = time.time()
 print >>sys.stderr, passedTime(start, time.time()), "reading", args.inputfile
 df=pd.read_table(args.inputfile, sep='\t', header=0, index_col=0)
 
-# randomly select 1000 samples 
-if len(list(df)) > 1000 and not args.no_subsample:
-    print >>sys.stderr, passedTime(start, time.time()),  "randomly selecting 1000 samples"
-    ids = list(df)
-    np.random.shuffle(ids)
-    df = df.loc[:,ids[:1000]]
+if args.subsample:
+    # randomly select samples 
+    if len(list(df)) > args.subsample:
+        print >>sys.stderr, passedTime(start, time.time()),  "randomly selecting {} samples of {}".format(args.subsample, len(list(df)))
+        ids = list(df)
+        np.random.shuffle(ids)
+        df = df.loc[:,ids[:args.subsample]]
 
 # remove genes with average expression of 1 or less 
-
 print >>sys.stderr, passedTime(start, time.time()),  "removing low expression genes (<1)"
 df = df[df.mean(1)>1]
 
@@ -119,24 +118,15 @@ if args.print_reduced:
 
 ### TODO: MUST FILTER OUT LOW SCORING SAMPLES
 
-# input to clusterers is the transposed dataframe
-sbg = df.transpose()
+if not args.genes:
+    # when clustering on samples, must use the transposed dataframe
+    sbg = df.transpose()
 
-#####  tSNE     ######################################################
-
-print >>sys.stderr, passedTime(start, time.time()),  "t-SNE..."
-projection = TSNE().fit_transform(sbg)
-xys = pd.DataFrame(projection, index=sbg.index)
-xys.to_csv(args.base+'.tsne_xys.tsv', index_label='#ID', sep='\t')
-# we can't use the sbg.index later on, so create new
-projection = pd.DataFrame(projection)
 
 #####  Cluster  ######################################################
 
 methods = []	# holds all info on each clustering method
 n_clusters = args.clusters
-
-print >>sys.stderr, passedTime(start, time.time()),  "Clustering..."
 
 
 print >>sys.stderr, passedTime(start, time.time()),  "Bicluster (probabilistic, YMMV)"
@@ -146,11 +136,10 @@ biclust = SpectralBiclustering(n_clusters=n_clusters, method='log', n_components
 biclust.fit(sbg)
 labels = biclust.row_labels_
 silscore = silhouette_score(sbg, labels)
-biclustObject = robust.cmethod('biclust', labels, silscore, 0.0, args.maxfract)
-biclustObject.leesL=robust.leesLScore(projection, labels)
+biclustObject = utils.cmethod('biclust', labels, silscore, 0.0, args.maxfract)
 methods.append(biclustObject)
 
-print >>sys.stderr, passedTime(start, time.time()),  "Hierarchical clustering"
+print >>sys.stderr, passedTime(start, time.time()),  "Hierarchical clustering with a distance matrix"
 # using a precomputed distance matrix (correlation and yule work equally well in testing)
 # average and complete linkage both work well
 s_distance = pairwise_distances(sbg, metric='correlation')
@@ -159,28 +148,28 @@ for l in ['average', 'complete']:
     ac.fit_predict(s_distance)
     labels = ac.labels_
     # the cophenetic index can only be calculated on a scipy.hierarchy distance matrix, so create one.
-    ac = robust.distanceMatrix(ac)
+    ac = utils.distanceMatrix(ac)
     # NOTE: the cophenetic score does not change if you alter the number of clusters
     c, coph_dists = cophenet(ac.distancematrix, sf(s_distance))
     silscore = silhouette_score(s_distance, labels, metric="precomputed")
     cname = 'hier_' + l
-    hierObject = robust.cmethod(cname, labels, silscore, c, args.maxfract)
-    hierObject.leesL=robust.leesLScore(projection, labels)
+    hierObject = utils.cmethod(cname, labels, silscore, c, args.maxfract)
     methods.append(hierObject)
 
-# using WARD clustering (always euclideans)
+print >>sys.stderr, passedTime(start, time.time()),  "Hierarchical clustering using WARD linkage"
+# Ward calculates its own euclidean distance matrix
 ac = AgglomerativeClustering(n_clusters=n_clusters, linkage='ward')
 ac.fit_predict(sbg)
 labels = ac.labels_
-ac = robust.distanceMatrix(ac)
+ac = utils.distanceMatrix(ac)
 # create euclidean distance matrix for cophenetic score
 c, coph_dists = cophenet(ac.distancematrix, pdist(sbg))
 silscore = silhouette_score(sbg, labels)
-hierObject = robust.cmethod('hier_ward', labels, silscore, c, args.maxfract)
-hierObject.leesL=robust.leesLScore(projection, labels)
+hierObject = utils.cmethod('hier_ward', labels, silscore, c, args.maxfract)
 methods.append(hierObject)
 
-# using spearman rank based matrix - unfortunately not an option in sklearn so use scipy
+print >>sys.stderr, passedTime(start, time.time()),  "Hierarchical clustering using spearman rank"
+# unfortunately this is not an option in sklearn so use scipy
 spearmat, pval = spearmanr(sbg, axis=1)
 spearmat = np.round(1-spearmat, 6) # without rounding there are non-zero values on the diagonals
 for l in ['average', 'complete']:
@@ -190,12 +179,11 @@ for l in ['average', 'complete']:
     c, coph_dists = cophenet(spearman_samples, sf(spearmat))
     silscore = silhouette_score(spearmat, labels, metric="precomputed")
     cname = 'hier_spearman_' + l
-    hiersaObject = robust.cmethod(cname, labels, silscore, c, args.maxfract)
-    hiersaObject.leesL=robust.leesLScore(projection, labels)
+    hiersaObject = utils.cmethod(cname, labels, silscore, c, args.maxfract)
     methods.append(hiersaObject)
 
 if not args.noK:
-    print >>sys.stderr, passedTime(start, time.time()),  "KMEANS  (probabilistic, varies wildly)"
+    print >>sys.stderr, passedTime(start, time.time()),  "KMEANS  (probabilistic, YMMV)"
     # I thought max_iter was supposed to result in convergence but it doesn't seem to help much
     # run 5 times just to show range of outcome
     for i in xrange(1,6):
@@ -203,113 +191,64 @@ if not args.noK:
         labels = kmeans.fit_predict(sbg)
         silscore = silhouette_score(sbg, labels)
         cname = 'kmeans_' + str(i)
-        kmeansObject = robust.cmethod(cname, labels, silscore, 0.0, args.maxfract)
-        kmeansObject.leesL=robust.leesLScore(projection, labels)
+        kmeansObject = utils.cmethod(cname, labels, silscore, 0.0, args.maxfract)
         methods.append(kmeansObject)
     
-    print >>sys.stderr, passedTime(start, time.time()),  "KMEDOIDS  (probabilistic, varies wildly)"
+    print >>sys.stderr, passedTime(start, time.time()),  "KMEDOIDS  (probabilistic, YMMV)"
     # Same issue as Kmeans. Same approach
     for i in xrange(1,6):
         medoids, clusterinfo, labels = kmedoids.kMedoids(s_distance, args.clusters)
         silscore = silhouette_score(s_distance, labels)
         cname = 'kmedoids_' + str(i)
-        kmedObject = robust.cmethod(cname, labels, silscore, 0.0, args.maxfract)
-        kmedObject.leesL=robust.leesLScore(projection, labels)
+        kmedObject = utils.cmethod(cname, labels, silscore, 0.0, args.maxfract)
         methods.append(kmedObject)
 
 
-#####  Validate results  ######################################################
+#####  Create consistent sample groups  ######################################################
+# This outputs a list of samples that always occur together in a cluster, no matter which method is used
+# It also adds a 'shared' column to the clusters output file. An attempt is made to give similar clusters
+# similar labels, so that cluster B1 largely contains the same samples in each cluster method.
 
-print >>sys.stderr, passedTime(start, time.time()),  "Finding consistent groups in all methods used"
-setlist = [i.dups for i in methods if i.ok]
-grouplist1, tally = robust.persistent_groups(copy.copy(setlist), list(sbg.index), args.min_groupsize)
-# print the groups to file
-samples = list(sbg.index)
-labels = [-1] * len(sbg.index)
+if args.print_groups:
+    print >>sys.stderr, passedTime(start, time.time()),  "Finding consistent groups in all methods used"
+    setlist = [i.dups for i in methods if i.ok]
+    grouplist1, tally = utils.persistent_groups(copy.copy(setlist), list(sbg.index), args.min_groupsize)
+    # print the groups to file
+    samples = list(sbg.index)
+    labels = [-1] * len(sbg.index)
+    
+    with open(args.base + '.groups.txt', 'w') as o:
+        o.write("Group\tMembercount\n")
+        for i in xrange(len(grouplist1)):
+            clabel = i+1
+            for x in grouplist1[i]:
+                idx = samples.index(x)
+                labels[idx] = clabel
+            o.write("Group {}\t{}\t{}\n".format(i, len(grouplist1[i]),"\t".join(str(x) for x in grouplist1[i])))
+    
+    shareObject = utils.cmethod('shared', labels, 0.0, 0.0, args.maxfract)
+    shareObject.ok = False
+    methods.append(shareObject)
+    utils.rename_labels(methods, tally)
+    shareObject.orderedlabels = ['' if x=='0' else x for x in shareObject.orderedlabels]
 
-with open(args.base + '.groups.txt', 'w') as o:
-    o.write("Group\tMembercount\n")
-    for i in xrange(len(grouplist1)):
-        clabel = i+1
-        for x in grouplist1[i]:
-            idx = samples.index(x)
-            labels[idx] = clabel
-        #tumtype = [x.split('_')[0] for x in grouplist1[i]]
-        o.write("Group {}\t{}\t{}\n".format(i, len(grouplist1[i]),"\t".join(str(x) for x in grouplist1[i])))
+with open(args.base + '.scores.txt', 'w') as s:
+    s.write("silhouette score\tcophenetic score\tdensity score\tmethod\n")
+    for i in methods:
+        if i.ok and not (i.name == 'shared'):
+            if i.cscore == 0.0:
+                s.write("{0:.2f}\tNA\t{1}\n".format(i.silscore, i.name))
+            else:
+                s.write("{0:.2f}\t{1:0.2f}\t{2}\n".format(i.silscore, i.cscore, i.name))
 
-shareObject = robust.cmethod('shared', labels, 0.0, 0.0, args.maxfract)
-shareObject.leesL=0.0
-shareObject.ok = False
-methods.append(shareObject)
-robust.rename_labels(methods, tally)
-shareObject.orderedlabels = ['' if x=='0' else x for x in shareObject.orderedlabels]
-
-print "silhouette score\tcophenetic score\tdensity score\tmethod"
-for i in methods:
-    if i.ok:
-        if i.cscore == 0.0:
-            print "{0:.2f}\tNA\t{1:0.3f}\t{2}".format(i.silscore, i.leesL, i.name)
-        else:
-            print "{0:.2f}\t{1:0.2f}\t{3:0.3f}\t{2}".format(i.silscore, i.cscore, i.name, i.leesL)
-
-shareObject.ok = True
 
 #####  Output cluster file  ###################################################
 #samples on rows, clusters in columns - prepend a letter to the labels so TumorMap will show them properly
+
 outdf = pd.DataFrame([i.orderedlabels for i in methods if i.ok])
 outdf.columns = df.columns
 outdf = outdf.transpose()
 outdf.columns = [i.name for i in methods if i.ok]
 outdf.to_csv(args.base+'.clusters.tsv', sep='\t')
 
-sys.exit()
-
-####  Hold out #####################################################################
-# To avoid having one method mess up the shared groups, do an all vs all comparison with one holdout each round
-# Then keep the least fragmented set
-
-bestgroup = grouplist1
-maxsize = 0
-namelist = [i.name for i in methods if i.ok]
-for i in xrange(len(namelist)):
-    newset = setlist[::]
-    del(newset[i])
-    count = 0
-    grouplist, tally = robust.persistent_groups(newset[::], list(sbg.index), args.min_groupsize)
-    # count size of first groups
-    for x in xrange(min(len(grouplist), args.clusters)):
-         count += len(grouplist[x])
-    # allow a bit of wiggle
-    if count > maxsize +5:
-        print >>sys.stderr, "best group currently the one without {}, groupsize is then {}".format(namelist[i], count)
-        bestgroup = grouplist
-        maxsize = count
-
-# Treat the shared groups like any other cluster method. Any sample not in a group is labeled -1
-# this gets changed to '0' in printing so Tumormap won't show it
- 
-# print the groups to file
-samples = list(sbg.index)
-labels = [-1] * len(sbg.index)
-
-with open(args.base + '.groups.txt', 'w') as o:
-    o.write("Group\tMembercount\n")
-    for i in xrange(len(bestgroup)):
-        clabel = i+1
-        for x in bestgroup[i]:
-            idx = samples.index(x)
-            labels[idx] = clabel
-        #tumtype = [x.split('_')[0] for x in bestgroup[i]]
-        o.write("Group {}\t{}\t{}\n".format(i, len(bestgroup[i]),"\t".join(str(x) for x in bestgroup[i])))
-
-shareObject = robust.cmethod('shared', labels, "0.0", "0.0", args.maxfract)
-methods.append(shareObject)
-
-#####  Output cluster file  ###################################################
-#samples on rows, clusters in columns - prepend a letter to the labels so TumorMap will show them properly
-outdf = pd.DataFrame([i.strlabels for i in methods if i.ok])
-outdf.columns = df.columns
-outdf = outdf.transpose()
-outdf.columns = [i.name for i in methods if i.ok]
-outdf.to_csv(args.base+'.clusters.tsv', sep='\t')
 

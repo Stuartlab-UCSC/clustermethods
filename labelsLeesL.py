@@ -12,7 +12,7 @@ import textwrap
 import copy
 import numpy as np
 import pandas as pd
-import robust
+import utils
 
 parser = argparse.ArgumentParser(
     formatter_class=argparse.RawDescriptionHelpFormatter,
@@ -36,4 +36,4 @@ xys=pd.read_table(args.xys, sep='\t', header=0, index_col=0)
 
 for c in labeldf.columns:
     labels = labeldf[c]
-    print "{1:.03f}\t{2}\t{0}".format(c, robust.leesLScore(xys, labels), args.xys)
+    print "{1:.03f}\t{2}\t{0}".format(c, utils.leesLScore(xys, labels), args.xys)

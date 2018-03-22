@@ -9,7 +9,7 @@ a ground truth. The silhouette score is one, and a good range is supposed to be 
 
 The current output consists of these silhouette scores and a list of samples that group together in each algorithm.
 
-The program is dependent on three homemade libraries: robust, kmedoids and hdbscan. These should be in the same github repo
+The program is dependent on three homemade libraries: utils, kmedoids and hdbscan. These should be in the same github repo
 as the current program.
 
 The module python-sklearn can be installed on Ubuntu using apt-get; hdbscan, scipy and numpy can be pip installed.

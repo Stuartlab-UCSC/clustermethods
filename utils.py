@@ -200,5 +200,5 @@ def leesLScore(xys, labels, split=False):
     if split:
         return [posScore, negScore]
     else:
-        return posScore+negScore
+        return posScore-negScore
 
