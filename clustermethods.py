@@ -1,8 +1,6 @@
 #!/usr/bin/env python2.7
 
 """
-THIS IS A WORK IN PROGRESS. CODE NEEDS TO BE REFACTORED
-
 The goal of this program is to run several clustering methods on a gene by sample log2(FPKM/TPM)+1 tsv file, and to return information that allows
 the researcher to decide on the 'best' one. Unfortunately there are few 'blind' measures to decide this, at least without having
 a ground truth. The silhouette score is one, and a good range is supposed to be upwards of 0.6 (it goes to 1).
@@ -12,7 +10,7 @@ for biclustering or kmeans/kmedoids.
 The program is dependent on three homemade libraries: utils, kmedoids and hierarchical. These should be in the same github repo
 as the current program. Hierarchical is a slightly altered copy of sklearn.cluster.AgglomerativeClustering. See the code for details.
 
-The module python-sklearn can be installed on Ubuntu using apt-get; scipy and numpy can be pip installed.
+The module python-sklearn can be installed on Ubuntu using apt-get; pandas, scipy and numpy can be pip installed.
 
 """
 
@@ -34,7 +32,6 @@ from hierarchical import AgglomerativeClustering
 from sklearn.metrics import silhouette_score
 from sklearn.metrics.pairwise import pairwise_distances
 from sklearn.cluster.bicluster import SpectralBiclustering
-from sklearn.manifold import TSNE
 
 
 def passedTime(start, end):
@@ -104,22 +101,20 @@ if args.subsample:
 # remove genes with average expression of 1 or less 
 print >>sys.stderr, passedTime(start, time.time()),  "removing low expression genes (<1)"
 df = df[df.mean(1)>1]
-
-# Rank genes by stdev
-print >>sys.stderr, passedTime(start, time.time()),  "selecting 1000 genes with highest stdev"
-df['stdev'] = df.std(axis=1)
-df.sort_values('stdev', inplace=True, ascending=False)
-df.drop('stdev', axis=1, inplace=True)
-# get 1000 most variable genes over all samples
-df = df.head(1000)
-
-if args.print_reduced:
-    df.to_csv(args.base+'.1kgenes.tsv', sep='\t')
-
-### TODO: MUST FILTER OUT LOW SCORING SAMPLES
+sbg = df
 
 if not args.genes:
-    # when clustering on samples, must use the transposed dataframe
+    # Rank genes by stdev
+    print >>sys.stderr, passedTime(start, time.time()),  "selecting 1000 genes with highest stdev"
+    df['stdev'] = df.std(axis=1)
+    df.sort_values('stdev', inplace=True, ascending=False)
+    df.drop('stdev', axis=1, inplace=True)
+    # get 1000 most variable genes over all samples
+    df = df.head(1000)
+    
+    if args.print_reduced:
+        df.to_csv(args.base+'.1kgenes.tsv', sep='\t')
+
     sbg = df.transpose()
 
 
