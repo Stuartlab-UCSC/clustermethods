@@ -20,9 +20,9 @@ The best way is to visualize your data using a dimensionality reduction method s
 
 If your data comes out as a single blob on either of these methods, you likely won't be able to get multiple clusters from the clustering algorithms. Of course you can request three clusters and the programs will give you something, but it's likely meaningless and will differ between methods.
 
-### 2. Log2(TPM/FPKM)+1
+### 2. Log2(TPM/FPKM+1)
 
-If you haven't already done so, convert your FPKM input to log2(TPM)+1. The fpkmToLog2TPMplus1.py in this repository does exactly what it says.
+If you haven't already done so, convert your FPKM input to log2(TPM+1). The fpkmToLog2TPMplus1.py in this repository does exactly what it says.
 
 ## Running the program
 ### 3. Clustering methods
