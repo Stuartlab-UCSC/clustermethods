@@ -240,7 +240,10 @@ with open(args.base + '.scores.txt', 'w') as s:
 #####  Output cluster file  ###################################################
 #samples on rows, clusters in columns - prepend a letter to the labels so TumorMap will show them properly
 
-outdf = pd.DataFrame([i.orderedlabels for i in methods if i.ok])
+if hasattr(i, 'orderedlabels'):
+    outdf = pd.DataFrame([i.orderedlabels for i in methods if i.ok])
+else:
+    outdf = pd.DataFrame([i.labels for i in methods if i.ok])
 outdf.columns = df.columns
 outdf = outdf.transpose()
 outdf.columns = [i.name for i in methods if i.ok]
